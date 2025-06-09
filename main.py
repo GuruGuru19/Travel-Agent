@@ -7,15 +7,30 @@ from typing import TypedDict
 from dotenv import load_dotenv
 
 from langchain.chat_models import init_chat_model
+from langchain_core.messages import SystemMessage
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.tools import tool
 
 from langgraph.prebuilt import ToolNode
 from langgraph.graph import StateGraph, START, END
 
+import requests
+
 load_dotenv()
 
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
 CHAT_MODEL = "qwen3:4b"
+
+system_prompt = """You are George, a helpful, friendly, and efficient travel agent. Your goal is to assist users with 
+travel-related queries, including weather forecasts, travel tips, destinations, and planning.
+
+Use tools when needed, and respond clearly and concisely. Avoid unnecessary explanations. Prefer bullet points for 
+lists. If unsure or lacking information, say so briefly and suggest alternatives.
+
+Never suggest help if you are missing the tools to do so.
+
+Stay professional, polite, and proactive.
+"""
 
 
 class ChatState(TypedDict):
@@ -23,14 +38,11 @@ class ChatState(TypedDict):
 
 
 # tools
-import requests
-
-
 @tool
 def get_weather_current(city_name: str) -> str:
     """returns the current weather and temperature for a given city name"""
 
-    print(f"Getting weather for {city_name} with get_weather() tool")
+    print(f"!!! Getting weather for {city_name} with get_weather() tool")
 
     base_url = "https://api.openweathermap.org/data/2.5/weather"
     params = {
@@ -55,6 +67,7 @@ def get_weather_current(city_name: str) -> str:
 @tool
 def get_weather_forecast(city_name: str) -> str:
     """Returns the weather and temperature forecast for the next 5 days with a given city name."""
+    print(f"!!! Getting weather forecast for {city_name} with get_weather_forecast() tool")
     base_url = "https://api.openweathermap.org/data/2.5/forecast"
     params = {
         "q": city_name,
@@ -103,4 +116,63 @@ def get_weather_forecast(city_name: str) -> str:
     return f"{current_summary}\nTemperature & weather forecast:\n{forecast_summary}"
 
 
-print(get_weather_forecast("New York"))
+tool_list = [get_weather_forecast, get_weather_current]
+
+agent_llm = init_chat_model(CHAT_MODEL, model_provider="ollama")
+agent_llm = agent_llm.bind_tools(tool_list)
+
+
+# prompt_template = ChatPromptTemplate.from_messages([
+#     ("system", system_prompt),
+#     ("user", "{input}")
+# ])
+
+
+def interpreter_node(state):
+    """use the LLM to generate the next step. it could be a tool all or just a 'final answer' response"""
+    response = agent_llm.invoke(state['messages'])
+    return {'messages': state['messages'] + [response]}
+
+
+def router_node(state):
+    last_message = state['messages'][-1]
+    return 'tools' if getattr(last_message, 'tool_calls', None) else 'end'
+
+
+tool_node = ToolNode(tool_list)
+
+
+def tools_node(state):
+    result = tool_node.invoke(state)
+
+    return {
+        'messages': state['messages'] + result['messages']
+    }
+
+
+builder = StateGraph(ChatState)
+builder.add_node('interpreter', interpreter_node)
+builder.add_node('tools', tools_node)
+
+builder.add_edge(START, 'interpreter')
+builder.add_edge('tools', 'interpreter')
+builder.add_conditional_edges('interpreter', router_node, {'tools': 'tools', 'end': END})
+
+graph = builder.compile()
+
+if __name__ == '__main__':
+    state = {'messages': [{'role': 'system', 'content': system_prompt}]}
+
+    print('Type an instruction or "/q".\n')
+
+    while True:
+        user_message = input('> ')
+
+        if user_message.lower() == '/q':
+            break
+
+        state['messages'].append({'role': 'user', 'content': user_message})
+
+        state = graph.invoke(state)
+
+        print(state['messages'][-1].content, '\n')
