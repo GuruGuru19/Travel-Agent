@@ -36,7 +36,7 @@ You can read and pick an LLM from this list: https://ollama.com/search.
 > ```
 
 # Notes on key prompt engineering decisions
-This is the system prompt:
+This is the system prompt (can be found in Main.py at line 24):
  ```python
 system_prompt = f"""Today is {datetime.today().strftime("%A, %B %d, %Y")}.
 You are George, a helpful, friendly, and efficient travel agent. Your goal is to assist users with 
