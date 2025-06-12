@@ -10,6 +10,14 @@
 You can read and pick an LLM from this list: https://ollama.com/search.
 
 
+### Clone this repository
+
+1. Open your terminal and move to a directory where you want the project to be located.
+2. Clone this repo.
+```shell
+git clone https://github.com/GuruGuru19/Travel-Agent.git
+```
+
 ### Second - setup `.env` file
 1. Make a new file in the project directory named `.env`.
 2. Insert `CHAT_MODEL=model_name` use the model name that you picked in the ollama setup.
